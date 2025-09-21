@@ -56,9 +56,11 @@ async function startBot() {
       msg.message.videoMessage?.caption ||
       '';
 
-    if (!text || !text.startsWith(config.PREFIX)) return;
+    const prefixes = config.PREFIX.split(',').map(p => p.trim());
+const usedPrefix = prefixes.find(p => text.startsWith(p));
+if (!usedPrefix) return;
 
-    const body = text.trim().slice(config.PREFIX.length);
+    const body = text.trim().slice(usedPrefix.length);
     const isGroup = msg.key.remoteJid.endsWith('@g.us');
 
     let effectiveSender;
