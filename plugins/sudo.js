@@ -1,7 +1,11 @@
 const fs = require('fs');
 const path = require('path');
-const { reloadEnv } = require('../config');
+const { bot } = require('../lib');
 const ENV_PATH = path.join(__dirname, '../.env');
+
+function reloadEnv() {
+  require('dotenv').config({ path: ENV_PATH, override: true });
+}
 
 function getSudoList() {
   reloadEnv();
@@ -17,43 +21,44 @@ function updateSudoList(list) {
   reloadEnv();
 }
 
-module.exports = {
-  pattern: 'listsudo|addsudo(?:\\s+(\\d+))?|removesudo(?:\\s+(\\d+))?',
-  fromMe: true,
-  desc: 'Manage sudo users',
-  type: 'admin',
-
-  async handler({ send, msg }, match1, match2, body) {
+bot(
+  {
+    pattern: 'listsudo|addsudo(?:\\s+(\\d+))?|removesudo(?:\\s+(\\d+))?',
+    desc: 'Manage sudo users',
+    type: 'admin',
+    fromMe: false // ✅ Allow OWNER and SUDO to use
+  },
+  async (message, match1, match2, body) => {
     const command = body.startsWith('addsudo') ? 'add' :
                     body.startsWith('removesudo') ? 'remove' : 'list';
 
     let number = match1 || match2;
-    if (!number && msg.message?.extendedTextMessage?.contextInfo?.participant) {
-      number = msg.message.extendedTextMessage.contextInfo.participant.split('@')[0];
+    if (!number && message.msg?.extendedTextMessage?.contextInfo?.participant) {
+      number = message.msg.extendedTextMessage.contextInfo.participant.split('@')[0];
     }
 
     const sudoList = getSudoList();
 
     if (command === 'list') {
-      return await send(sudoList.length ? `👑 sudo added = ${sudoList.join(', ')}` : 'No sudo users found.');
+      return await message.send(sudoList.length ? `👑 sudo added = ${sudoList.join(', ')}` : 'No sudo users found.');
     }
 
     if (!number || !/^\d{10,}$/.test(number)) {
-      return await send('❌ Provide a valid number or reply to a user.');
+      return await message.send('❌ Provide a valid number or reply to a user.');
     }
 
     if (command === 'add') {
-      if (sudoList.includes(number)) return await send('✅ Already in sudo list.');
+      if (sudoList.includes(number)) return await message.send('✅ Already in sudo list.');
       sudoList.push(number);
       updateSudoList(sudoList);
-      return await send(`✅ sudo added = ${sudoList.join(', ')}`);
+      return await message.send(`✅ sudo added = ${sudoList.join(', ')}`);
     }
 
     if (command === 'remove') {
-      if (!sudoList.includes(number)) return await send('❌ Not found in sudo list.');
+      if (!sudoList.includes(number)) return await message.send('❌ Not found in sudo list.');
       const updated = sudoList.filter(n => n !== number);
       updateSudoList(updated);
-      return await send(`✅ sudo updated = ${updated.join(', ')}`);
+      return await message.send(`✅ sudo updated = ${updated.join(', ')}`);
     }
   }
-};
+);
