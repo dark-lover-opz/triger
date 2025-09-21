@@ -3,7 +3,8 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
-  jidNormalizedUser
+  jidNormalizedUser,
+  makeCacheableSignalKeyStore
 } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const fs = require('fs');
@@ -11,9 +12,8 @@ const path = require('path');
 const chalk = require('chalk');
 const { getConfig, setConfig } = require('./configCache');
 const { getPlugins } = require('./lib');
-const ENV_PATH = path.join(__dirname, '.env');
 
-// 🔌 Load all plugins
+// 🔌 Load plugins
 fs.readdirSync('./plugins').forEach(file => {
   if (file.endsWith('.js')) require(`./plugins/${file}`);
 });
@@ -32,8 +32,17 @@ async function startBot() {
 
   const sock = makeWASocket({
     version,
-    auth: state,
-    defaultQueryTimeoutMs: undefined,
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys)
+    },
+    printQRInTerminal: true,
+    browser: ['TrigerBot', 'Chrome', '1.0.0'],
+    syncFullHistory: false,
+    markOnlineOnConnect: true,
+    emitOwnEvents: true,
+    generateHighQualityLinkPreview: true,
+    getMessage: async () => undefined
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -54,16 +63,14 @@ async function startBot() {
     const usedPrefix = prefixes.find(p => text.toLowerCase().startsWith(p.toLowerCase()));
     if (!usedPrefix) return;
 
-    const rawBody = text.trim().slice(usedPrefix.length).trim(); // ✅ handles `. ping`
+    const rawBody = text.trim().slice(usedPrefix.length).trim();
     const isGroup = msg.key.remoteJid.endsWith('@g.us');
 
-    let effectiveSender;
-    if (isGroup) {
-      effectiveSender = msg.key.participant || sock.user.id;
-    } else {
-      const remoteJid = msg.key.remoteJidAlt || msg.key.remoteJid;
-      effectiveSender = msg.key.fromMe ? sock.user.id : remoteJid;
-    }
+    let effectiveSender = isGroup
+      ? msg.key.participant || sock.user.id
+      : msg.key.fromMe
+        ? sock.user.id
+        : msg.key.remoteJidAlt || msg.key.remoteJid;
 
     let sender = await jidNormalizedUser(effectiveSender);
 
@@ -93,7 +100,7 @@ async function startBot() {
     };
 
     for (const plugin of getPlugins()) {
-      const match = plugin.regex.exec(rawBody); // ✅ match against trimmed body
+      const match = plugin.regex.exec(rawBody);
       if (match) {
         const allow = plugin.fromMe ? (isFromBot || isOwner) : (isOwner || isSudo || isFromBot);
         if (!allow) {
@@ -112,9 +119,7 @@ async function startBot() {
     }
   });
 
-  sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
+  sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
     if (qr) {
       console.log(chalk.yellow('📱 Scan this QR to connect:'));
       console.log(qr);
