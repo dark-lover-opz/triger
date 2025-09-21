@@ -10,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const chalk = require('chalk');
 const { getConfig, setConfig } = require('./configCache');
-const { getCommand } = require('./lib/bot'); // ✅ Correct import
+const { getPlugins } = require('./lib');
 const ENV_PATH = path.join(__dirname, '.env');
 
 // 🔌 Load all plugins
@@ -51,23 +51,29 @@ async function startBot() {
       '';
 
     const prefixes = config.PREFIX?.split(',').map(p => p.trim()) || ['.'];
-    const usedPrefix = prefixes.find(p => text.startsWith(p));
+    const usedPrefix = prefixes.find(p => text.toLowerCase().startsWith(p.toLowerCase()));
     if (!usedPrefix) return;
 
-    const body = text.trim().slice(usedPrefix.length);
-    const command = body.split(' ')[0].toLowerCase();
-    const plugin = getCommand(command);
-    if (!plugin) return;
-
+    const rawBody = text.trim().slice(usedPrefix.length).trim(); // ✅ handles `. ping`
     const isGroup = msg.key.remoteJid.endsWith('@g.us');
-    let effectiveSender = isGroup ? msg.key.participant || sock.user.id : msg.key.fromMe ? sock.user.id : msg.key.remoteJid;
-    let sender = jidNormalizedUser(effectiveSender);
+
+    let effectiveSender;
+    if (isGroup) {
+      effectiveSender = msg.key.participant || sock.user.id;
+    } else {
+      const remoteJid = msg.key.remoteJidAlt || msg.key.remoteJid;
+      effectiveSender = msg.key.fromMe ? sock.user.id : remoteJid;
+    }
+
+    let sender = await jidNormalizedUser(effectiveSender);
 
     if (sender.includes('@lid')) {
       const lidMap = sock.signalRepository?.lidMapping;
       const lidUser = sender.split('@')[0];
       const mapped = lidMap?.getPNForLID(lidUser);
-      if (mapped) sender = jidNormalizedUser(`${mapped}@s.whatsapp.net`);
+      if (mapped) {
+        sender = await jidNormalizedUser(`${mapped}@s.whatsapp.net`);
+      }
     }
 
     const senderNum = sender.split('@')[0];
@@ -76,31 +82,37 @@ async function startBot() {
     const isSudo = sudoNums.includes(senderNum);
     const isFromBot = msg.key.fromMe;
 
-    const allow = plugin.fromMe ? (isFromBot || isOwner) : (isOwner || isSudo || isFromBot);
-    if (!allow) {
-      console.log(chalk.gray(`⛔ Skipped command: ${command} (not allowed)`));
-      return;
-    }
-
     const message = {
       sock,
       msg,
       sender,
-      body,
+      body: rawBody,
       send: async (text) => {
         await sock.sendMessage(msg.key.remoteJid, { text }, { quoted: msg });
       }
     };
 
-    console.log(chalk.blue(`🔍 Matched command: ${command}`));
-    try {
-      await plugin.handler(message);
-    } catch (err) {
-      console.log(chalk.red(`⚠️ Error in command ${command}: ${err.message}`));
+    for (const plugin of getPlugins()) {
+      const match = plugin.regex.exec(rawBody); // ✅ match against trimmed body
+      if (match) {
+        const allow = plugin.fromMe ? (isFromBot || isOwner) : (isOwner || isSudo || isFromBot);
+        if (!allow) {
+          console.log(chalk.gray(`⛔ Skipped plugin: ${plugin.pattern} (not allowed)`));
+          return;
+        }
+
+        console.log(chalk.blue(`🔍 Matched plugin: ${plugin.pattern}`));
+        try {
+          await plugin.handler(message, match[1], match[2], rawBody);
+        } catch (err) {
+          console.log(chalk.red(`⚠️ Error in plugin ${plugin.pattern}: ${err.message}`));
+        }
+        break;
+      }
     }
   });
 
-  sock.ev.on('connection.update', (update) => {
+  sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
@@ -109,7 +121,7 @@ async function startBot() {
     }
 
     if (connection === 'open') {
-      const botJid = jidNormalizedUser(sock.user?.id);
+      const botJid = await jidNormalizedUser(sock.user?.id);
       if (botJid) {
         ensureOwner(botJid);
         console.log(chalk.blue(`🤖 Triger is online as ${botJid}`));

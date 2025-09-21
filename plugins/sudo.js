@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { bot } = require('../lib');
+const { loadConfig } = require('../configCache');
 const ENV_PATH = path.join(__dirname, '../.env');
 
 function reloadEnv() {
@@ -19,46 +20,87 @@ function updateSudoList(list) {
   env = env.includes('SUDO=') ? env.replace(/SUDO=.*/g, sudoLine) : env + `\n${sudoLine}`;
   fs.writeFileSync(ENV_PATH, env);
   reloadEnv();
+  loadConfig();
+}
+
+function extractNumber(message, match1, match2) {
+  let number = match1 || match2;
+  const context = message.msg?.extendedTextMessage?.contextInfo;
+
+  if (!number && context?.participant) {
+    number = context.participant.split('@')[0];
+  }
+
+  if (!number && context?.remoteJid && context?.quotedMessage) {
+    number = context.remoteJid.split('@')[0];
+  }
+
+  if (!number && context?.quotedMessage?.key?.participant) {
+    number = context.quotedMessage.key.participant.split('@')[0];
+  }
+
+  if (!number && context?.mentionedJid?.length) {
+    const jid = context.mentionedJid[0];
+    number = jid.split('@')[0];
+  }
+
+  if (number?.startsWith('@')) number = number.slice(1);
+  return number;
 }
 
 bot(
   {
-    pattern: 'listsudo|addsudo(?:\\s+(\\d+))?|removesudo(?:\\s+(\\d+))?',
+    pattern: 'sudolist|addsudo(?:\\s+(@?\\d+))?|delsudo(?:\\s+(@?\\d+))?',
     desc: 'Manage sudo users',
     type: 'admin',
-    fromMe: false // ✅ Allow OWNER and SUDO to use
+    fromMe: false
   },
   async (message, match1, match2, body) => {
     const command = body.startsWith('addsudo') ? 'add' :
-                    body.startsWith('removesudo') ? 'remove' : 'list';
+                    body.startsWith('delsudo') ? 'remove' : 'list';
 
-    let number = match1 || match2;
-    if (!number && message.msg?.extendedTextMessage?.contextInfo?.participant) {
-      number = message.msg.extendedTextMessage.contextInfo.participant.split('@')[0];
-    }
-
+    const number = extractNumber(message, match1, match2);
     const sudoList = getSudoList();
 
     if (command === 'list') {
-      return await message.send(sudoList.length ? `👑 sudo added = ${sudoList.join(', ')}` : 'No sudo users found.');
+      return await message.send(sudoList.length ? `👑 SUDO list:\n${sudoList.join('\n')}` : 'No sudo users found.');
     }
 
     if (!number || !/^\d{10,}$/.test(number)) {
-      return await message.send('❌ Provide a valid number or reply to a user.');
+      return await message.send('❌ Provide a valid number, reply to a user, or mention them.');
     }
 
     if (command === 'add') {
       if (sudoList.includes(number)) return await message.send('✅ Already in sudo list.');
       sudoList.push(number);
       updateSudoList(sudoList);
-      return await message.send(`✅ sudo added = ${sudoList.join(', ')}`);
+      return await message.send(`✅ Added to sudo:\n${sudoList.join('\n')}`);
     }
 
     if (command === 'remove') {
       if (!sudoList.includes(number)) return await message.send('❌ Not found in sudo list.');
       const updated = sudoList.filter(n => n !== number);
       updateSudoList(updated);
-      return await message.send(`✅ sudo updated = ${updated.join(', ')}`);
+      return await message.send(`✅ Removed from sudo:\n${updated.join('\n')}`);
     }
+  }
+);
+
+bot(
+  {
+    pattern: 'sudo',
+    desc: 'Show sudo command usage',
+    type: 'admin',
+    fromMe: false
+  },
+  async (message) => {
+    await message.send(
+      `👑 SUDO Management Help:\n\n` +
+      `• .sudolist\n` +
+      `• .addsudo 918xxxxxxxxx\n` +
+      `• .delsudo 918xxxxxxxxx\n` +
+      `• .addsudo (reply or mention)\n` +
+      `• .delsudo (reply or mention)`
+    );
   }
 );

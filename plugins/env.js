@@ -3,15 +3,12 @@ const { getConfig, setConfig } = require('../configCache');
 
 bot(
   {
-    pattern: 'setvar',
+    pattern: 'setvar (\\w+)[=\\s]+(.+)',
     desc: 'Set a variable in .env',
     type: 'admin',
     fromMe: false
   },
-  async (message) => {
-    const [_, key, ...rest] = message.body.split(' ');
-    const value = rest.join(' ');
-    if (!key || !value) return await message.send('❌ Usage: .setvar KEY VALUE');
+  async (message, key, value) => {
     setConfig(key, value);
     await message.send(`✅ Updated ${key}=${value}`);
   }
@@ -19,15 +16,16 @@ bot(
 
 bot(
   {
-    pattern: 'getvar',
+    pattern: 'getvar (\\w+)',
     desc: 'Get a variable from .env',
     type: 'admin',
     fromMe: false
   },
-  async (message) => {
-    const key = message.body.split(' ')[1];
+  async (message, key) => {
     const value = getConfig()[key];
-    if (value === undefined) return await message.send(`❌ ${key} not found`);
+    if (value === undefined) {
+      return await message.send(`❌ ${key} not found`);
+    }
     await message.send(`📦 ${key}=${value}`);
   }
 );
