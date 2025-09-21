@@ -1,4 +1,83 @@
+# Node modules and debug logs
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment and secrets
 .env
+.env.local
+.env.*.local
+auth-credentials.json
+
+# Baileys auth sessions
 auth/
 auth/*.json
-auth-credentials.json
+
+# VS Code and editor junk
+.vscode/
+*.code-workspace
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS-specific junk
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+Icon?
+
+# Logs and temp
+logs/
+*.log
+*.out
+*.err
+*.tmp
+*.temp
+*.swp
+*.pid
+*.seed
+*.pid.lock
+
+# Build artifacts and cache
+dist/
+build/
+.cache/
+.next/
+out/
+tmp/
+temp/
+*.tsbuildinfo
+
+# Coverage and testing
+coverage/
+*.lcov
+__tests__/
+jest/
+*.spec.js
+*.test.js
+*.spec.ts
+*.test.ts
+
+# Lock files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Git conflict leftovers
+*.bak
+*.old
+*.orig
+*.rej
+*.merge_file
+
+# System files
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Ignore all dotfiles except .env.example
+.*
+!.env.example
