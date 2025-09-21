@@ -9,25 +9,19 @@ const { Boom } = require('@hapi/boom');
 const fs = require('fs');
 const path = require('path');
 const chalk = require('chalk');
-const getConfig = require('./config');
-const { getPlugins } = require('./lib');
+const { getConfig, setConfig } = require('./configCache');
+const { getCommand } = require('./lib/bot'); // ✅ Correct import
 const ENV_PATH = path.join(__dirname, '.env');
 
-// 🔌 Load all plugins manually
+// 🔌 Load all plugins
 fs.readdirSync('./plugins').forEach(file => {
-  if (file.endsWith('.js')) {
-    require(`./plugins/${file}`);
-  }
+  if (file.endsWith('.js')) require(`./plugins/${file}`);
 });
 
 function ensureOwner(botJid) {
   const num = botJid.split('@')[0];
-  if (!process.env.OWNER || process.env.OWNER !== num) {
-    let env = fs.readFileSync(ENV_PATH, 'utf-8');
-    const ownerLine = `OWNER=${num}`;
-    env = env.includes('OWNER=') ? env.replace(/OWNER=.*/g, ownerLine) : env + `\n${ownerLine}`;
-    fs.writeFileSync(ENV_PATH, env);
-    require('dotenv').config({ path: ENV_PATH, override: true });
+  if (!getConfig().OWNER || getConfig().OWNER !== num) {
+    setConfig('OWNER', num);
     console.log(chalk.green(`✅ Bot number set as OWNER: ${num}`));
   }
 }
@@ -56,30 +50,24 @@ async function startBot() {
       msg.message.videoMessage?.caption ||
       '';
 
-    const prefixes = config.PREFIX.split(',').map(p => p.trim());
-const usedPrefix = prefixes.find(p => text.startsWith(p));
-if (!usedPrefix) return;
+    const prefixes = config.PREFIX?.split(',').map(p => p.trim()) || ['.'];
+    const usedPrefix = prefixes.find(p => text.startsWith(p));
+    if (!usedPrefix) return;
 
     const body = text.trim().slice(usedPrefix.length);
+    const command = body.split(' ')[0].toLowerCase();
+    const plugin = getCommand(command);
+    if (!plugin) return;
+
     const isGroup = msg.key.remoteJid.endsWith('@g.us');
-
-    let effectiveSender;
-    if (isGroup) {
-      effectiveSender = msg.key.participant || sock.user.id;
-    } else {
-      const remoteJid = msg.key.remoteJidAlt || msg.key.remoteJid;
-      effectiveSender = msg.key.fromMe ? sock.user.id : remoteJid;
-    }
-
+    let effectiveSender = isGroup ? msg.key.participant || sock.user.id : msg.key.fromMe ? sock.user.id : msg.key.remoteJid;
     let sender = jidNormalizedUser(effectiveSender);
 
     if (sender.includes('@lid')) {
       const lidMap = sock.signalRepository?.lidMapping;
       const lidUser = sender.split('@')[0];
       const mapped = lidMap?.getPNForLID(lidUser);
-      if (mapped) {
-        sender = jidNormalizedUser(`${mapped}@s.whatsapp.net`);
-      }
+      if (mapped) sender = jidNormalizedUser(`${mapped}@s.whatsapp.net`);
     }
 
     const senderNum = sender.split('@')[0];
@@ -88,32 +76,27 @@ if (!usedPrefix) return;
     const isSudo = sudoNums.includes(senderNum);
     const isFromBot = msg.key.fromMe;
 
+    const allow = plugin.fromMe ? (isFromBot || isOwner) : (isOwner || isSudo || isFromBot);
+    if (!allow) {
+      console.log(chalk.gray(`⛔ Skipped command: ${command} (not allowed)`));
+      return;
+    }
+
     const message = {
       sock,
       msg,
       sender,
+      body,
       send: async (text) => {
         await sock.sendMessage(msg.key.remoteJid, { text }, { quoted: msg });
       }
     };
 
-    for (const plugin of getPlugins()) {
-      const match = body.match(new RegExp(`^${plugin.pattern}$`, 'i'));
-      if (match) {
-        const allow = plugin.fromMe ? (isFromBot || isOwner) : (isOwner || isSudo || isFromBot);
-        if (!allow) {
-          console.log(chalk.gray(`⛔ Skipped plugin: ${plugin.pattern} (not allowed)`));
-          return;
-        }
-
-        console.log(chalk.blue(`🔍 Matched plugin: ${plugin.pattern}`));
-        try {
-          await plugin.handler(message, match[1], match[2], body);
-        } catch (err) {
-          console.log(chalk.red(`⚠️ Error in plugin ${plugin.pattern}: ${err.message}`));
-        }
-        break;
-      }
+    console.log(chalk.blue(`🔍 Matched command: ${command}`));
+    try {
+      await plugin.handler(message);
+    } catch (err) {
+      console.log(chalk.red(`⚠️ Error in command ${command}: ${err.message}`));
     }
   });
 
