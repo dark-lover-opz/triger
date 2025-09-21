@@ -1,28 +1,4 @@
-# Node modules
-node_modules/
-
-# Auth state and session data
-auth/
-session.json
-*.sqlite
-
-# Environment config
 .env
-
-# Logs and debug output
-*.log
-logs/
-debug.log
-
-# OS and editor junk
-.DS_Store
-Thumbs.db
-*.swp
-*.swo
-
-# VS Code settings
-.vscode/
-
-# Build artifacts
-dist/
-build/
+auth/
+auth/*.json
+auth-credentials.json
