@@ -1,8 +1,10 @@
 const fs = require('fs');
 const path = require('path');
+const { reloadEnv } = require('../config');
 const ENV_PATH = path.join(__dirname, '../.env');
 
 function getSudoList() {
+  reloadEnv();
   const raw = process.env.SUDO || '';
   return raw.split(',').map(n => n.trim()).filter(n => /^\d{10,}$/.test(n));
 }
@@ -12,7 +14,7 @@ function updateSudoList(list) {
   const sudoLine = `SUDO=${list.join(',')}`;
   env = env.includes('SUDO=') ? env.replace(/SUDO=.*/g, sudoLine) : env + `\n${sudoLine}`;
   fs.writeFileSync(ENV_PATH, env);
-  require('dotenv').config({ path: ENV_PATH, override: true });
+  reloadEnv();
 }
 
 module.exports = {
@@ -21,9 +23,9 @@ module.exports = {
   desc: 'Manage sudo users',
   type: 'admin',
 
-  async handler({ send, msg }, match1, match2) {
-    const command = msg.text.startsWith('.addsudo') ? 'add' :
-                    msg.text.startsWith('.removesudo') ? 'remove' : 'list';
+  async handler({ send, msg }, match1, match2, body) {
+    const command = body.startsWith('addsudo') ? 'add' :
+                    body.startsWith('removesudo') ? 'remove' : 'list';
 
     let number = match1 || match2;
     if (!number && msg.message?.extendedTextMessage?.contextInfo?.participant) {
