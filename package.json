@@ -1,0 +1,29 @@
+{
+  "name": "triger",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dark-lover-opz/triger.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/dark-lover-opz/triger/issues"
+  },
+  "homepage": "https://github.com/dark-lover-opz/triger#readme",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc.3",
+    "axios": "^1.12.2",
+    "chalk": "^4.1.2",
+    "dotenv": "^17.2.2",
+    "fs-extra": "^11.3.2",
+    "moment": "^2.30.1",
+    "node-fetch": "^3.3.2"
+  }
+}
