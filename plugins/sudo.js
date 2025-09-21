@@ -1,27 +1,39 @@
+const fs = require('fs');
+const path = require('path');
+const ENV_PATH = path.join(__dirname, '../.env');
+
+function getSudoList() {
+  const raw = process.env.SUDO || '';
+  return raw.split(',').map(n => n.trim()).filter(n => /^\d{10,}$/.test(n));
+}
+
+function updateSudoList(list) {
+  let env = fs.readFileSync(ENV_PATH, 'utf-8');
+  const sudoLine = `SUDO=${list.join(',')}`;
+  env = env.includes('SUDO=') ? env.replace(/SUDO=.*/g, sudoLine) : env + `\n${sudoLine}`;
+  fs.writeFileSync(ENV_PATH, env);
+  require('dotenv').config({ path: ENV_PATH, override: true });
+}
+
 module.exports = {
   pattern: 'listsudo|addsudo(?:\\s+(\\d+))?|removesudo(?:\\s+(\\d+))?',
   fromMe: true,
-  desc: 'Manage sudo users: list, add, remove',
+  desc: 'Manage sudo users',
   type: 'admin',
 
   async handler({ send, msg }, match1, match2) {
-    const { getSudoList, addSudo, removeSudo } = require('../config');
-
     const command = msg.text.startsWith('.addsudo') ? 'add' :
-                    msg.text.startsWith('.removesudo') ? 'remove' :
-                    'list';
+                    msg.text.startsWith('.removesudo') ? 'remove' : 'list';
 
     let number = match1 || match2;
-
-    // ✅ If no number provided, try to get from reply
     if (!number && msg.message?.extendedTextMessage?.contextInfo?.participant) {
       number = msg.message.extendedTextMessage.contextInfo.participant.split('@')[0];
     }
 
+    const sudoList = getSudoList();
+
     if (command === 'list') {
-      const sudoList = getSudoList();
-      if (sudoList.length === 0) return await send('No sudo users found.');
-      return await send(`👑 Sudo Users:\n\n${sudoList.map(n => `• ${n}`).join('\n')}`);
+      return await send(sudoList.length ? `👑 sudo added = ${sudoList.join(', ')}` : 'No sudo users found.');
     }
 
     if (!number || !/^\d{10,}$/.test(number)) {
@@ -29,15 +41,17 @@ module.exports = {
     }
 
     if (command === 'add') {
-      if (getSudoList().includes(number)) return await send('✅ Already in sudo list.');
-      addSudo(number);
-      return await send(`✅ Added to sudo: ${number}`);
+      if (sudoList.includes(number)) return await send('✅ Already in sudo list.');
+      sudoList.push(number);
+      updateSudoList(sudoList);
+      return await send(`✅ sudo added = ${sudoList.join(', ')}`);
     }
 
     if (command === 'remove') {
-      if (!getSudoList().includes(number)) return await send('❌ Not found in sudo list.');
-      removeSudo(number);
-      return await send(`✅ Removed from sudo: ${number}`);
+      if (!sudoList.includes(number)) return await send('❌ Not found in sudo list.');
+      const updated = sudoList.filter(n => n !== number);
+      updateSudoList(updated);
+      return await send(`✅ sudo updated = ${updated.join(', ')}`);
     }
   }
 };

@@ -8,11 +8,12 @@ const {
 const { Boom } = require('@hapi/boom');
 const fs = require('fs');
 const path = require('path');
-const config = require('./config');
 const chalk = require('chalk');
+const config = require('./config');
 const { getPlugins } = require('./lib');
 
 const pluginsPath = './plugins';
+const ENV_PATH = path.join(__dirname, '.env');
 
 // 🔌 Load all plugin files
 fs.readdirSync(pluginsPath).forEach(file => {
@@ -25,6 +26,19 @@ fs.readdirSync(pluginsPath).forEach(file => {
     }
   }
 });
+
+// 🔧 Ensure bot number is set as OWNER
+function ensureOwner(botJid) {
+  const num = botJid.split('@')[0];
+  if (!process.env.OWNER || process.env.OWNER !== num) {
+    let env = fs.readFileSync(ENV_PATH, 'utf-8');
+    const ownerLine = `OWNER=${num}`;
+    env = env.includes('OWNER=') ? env.replace(/OWNER=.*/g, ownerLine) : env + `\n${ownerLine}`;
+    fs.writeFileSync(ENV_PATH, env);
+    require('dotenv').config({ path: ENV_PATH, override: true });
+    console.log(chalk.green(`✅ Bot number set as OWNER: ${num}`));
+  }
+}
 
 async function startBot() {
   const { version } = await fetchLatestBaileysVersion();
@@ -52,7 +66,6 @@ async function startBot() {
     if (!text || !text.startsWith(config.PREFIX)) return;
 
     const body = text.trim().slice(config.PREFIX.length);
-
     const isGroup = msg.key.remoteJid.endsWith('@g.us');
 
     // ✅ Robust sender detection
@@ -78,15 +91,14 @@ async function startBot() {
 
     const botJid = jidNormalizedUser(sock.user.id);
     const senderNum = sender.split('@')[0];
-    const sudoNums = config.SUDO.map(jid => jid.split('@')[0]);
+    const sudoNums = (process.env.SUDO || '').split(',').map(n => n.trim());
 
     const isFromBot = msg.key.fromMe;
     const isSudo = sudoNums.includes(senderNum);
+    const isOwner = senderNum === process.env.OWNER;
 
-    // ✅ Allow if:
-    // - Message is from bot itself
-    // - Sender is sudo
-    if (!isFromBot && !isSudo) return;
+    // ✅ Allow only bot, owner, or sudo
+    if (!isFromBot && !isOwner && !isSudo) return;
 
     const message = {
       sock,
@@ -121,7 +133,7 @@ async function startBot() {
     if (connection === 'open') {
       const botJid = jidNormalizedUser(sock.user?.id);
       if (botJid) {
-        config.setOwner(botJid);
+        ensureOwner(botJid);
         console.log(chalk.blue(`🤖 Triger is online as ${botJid}`));
         console.log(chalk.green('✅ Connection established.'));
       } else {
