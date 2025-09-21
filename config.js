@@ -23,5 +23,5 @@ function getConfig() {
   };
 }
 
-module.exports = getConfig();
+module.exports = getConfig;
 module.exports.reloadEnv = reloadEnv;

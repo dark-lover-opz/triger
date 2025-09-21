@@ -9,25 +9,17 @@ const { Boom } = require('@hapi/boom');
 const fs = require('fs');
 const path = require('path');
 const chalk = require('chalk');
-const config = require('./config');
-const pluginsPath = './plugins';
+const getConfig = require('./config');
+const { getPlugins } = require('./lib');
 const ENV_PATH = path.join(__dirname, '.env');
 
-// 🔌 Load plugins into array
-const plugins = [];
-fs.readdirSync(pluginsPath).forEach(file => {
+// 🔌 Load all plugins manually
+fs.readdirSync('./plugins').forEach(file => {
   if (file.endsWith('.js')) {
-    try {
-      const plugin = require(`${pluginsPath}/${file}`);
-      plugins.push(plugin);
-      console.log(chalk.green(`✅ Loaded plugin: ${file}`));
-    } catch (err) {
-      console.log(chalk.red(`❌ Failed to load plugin ${file}: ${err.message}`));
-    }
+    require(`./plugins/${file}`);
   }
 });
 
-// 🔧 Set bot number as OWNER if not already set
 function ensureOwner(botJid) {
   const num = botJid.split('@')[0];
   if (!process.env.OWNER || process.env.OWNER !== num) {
@@ -56,6 +48,7 @@ async function startBot() {
     const msg = messages[0];
     if (!msg.message) return;
 
+    const config = getConfig();
     const text =
       msg.message.conversation ||
       msg.message.extendedTextMessage?.text ||
@@ -78,7 +71,6 @@ async function startBot() {
 
     let sender = jidNormalizedUser(effectiveSender);
 
-    // 🔁 Normalize LID JIDs
     if (sender.includes('@lid')) {
       const lidMap = sock.signalRepository?.lidMapping;
       const lidUser = sender.split('@')[0];
@@ -89,13 +81,10 @@ async function startBot() {
     }
 
     const senderNum = sender.split('@')[0];
-    const isOwner = senderNum === (process.env.OWNER || '').trim();
-    const sudoNums = (process.env.SUDO || '').split(',').map(n => n.trim());
+    const isOwner = senderNum === (config.OWNER || '').trim();
+    const sudoNums = (config.SUDO || '').split(',').map(n => n.trim());
     const isSudo = sudoNums.includes(senderNum);
     const isFromBot = msg.key.fromMe;
-
-    // 🔐 Only allow OWNER, SUDO, or bot itself
-    if (!isOwner && !isSudo && !isFromBot) return;
 
     const message = {
       sock,
@@ -106,9 +95,15 @@ async function startBot() {
       }
     };
 
-    for (const plugin of plugins) {
+    for (const plugin of getPlugins()) {
       const match = body.match(new RegExp(`^${plugin.pattern}$`, 'i'));
       if (match) {
+        const allow = plugin.fromMe ? (isFromBot || isOwner) : (isOwner || isSudo || isFromBot);
+        if (!allow) {
+          console.log(chalk.gray(`⛔ Skipped plugin: ${plugin.pattern} (not allowed)`));
+          return;
+        }
+
         console.log(chalk.blue(`🔍 Matched plugin: ${plugin.pattern}`));
         try {
           await plugin.handler(message, match[1], match[2], body);

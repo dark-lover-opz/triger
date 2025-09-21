@@ -5,6 +5,7 @@ bot(
     pattern: 'ping ?(.*)',
     desc: lang.plugins.ping.desc,
     type: 'misc',
+    fromMe: false // ✅ Allow OWNER and SUDO to use
   },
   async (message, match) => {
     const start = new Date().getTime();
