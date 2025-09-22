@@ -10,10 +10,10 @@ const { Boom } = require('@hapi/boom');
 const fs = require('fs');
 const path = require('path');
 const chalk = require('chalk');
+const pino = require('pino');
 const { getConfig, setConfig } = require('./configCache');
 const { getPlugins } = require('./lib');
 
-// 🔌 Load plugins
 fs.readdirSync('./plugins').forEach(file => {
   if (file.endsWith('.js')) require(`./plugins/${file}`);
 });
@@ -26,6 +26,19 @@ function ensureOwner(botJid) {
   }
 }
 
+function resolveSenderFromMsg(msg, sock) {
+  const possible =
+    msg.key?.participant ||
+    msg.participant ||
+    msg.message?.extendedTextMessage?.contextInfo?.participant ||
+    msg.message?.extendedTextMessage?.contextInfo?.remoteJid ||
+    msg.message?.viewOnceMessage?.message?.contextInfo?.participant ||
+    msg.message?.viewOnceMessage?.message?.contextInfo?.remoteJid ||
+    msg.key?.remoteJid ||
+    sock.user?.id;
+  return possible;
+}
+
 async function startBot() {
   const { version } = await fetchLatestBaileysVersion();
   const { state, saveCreds } = await useMultiFileAuthState('./auth');
@@ -36,7 +49,7 @@ async function startBot() {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys)
     },
-    printQRInTerminal: true,
+    logger: pino({ level: process.env.BAILEYS_LOG_LEVEL || 'warn' }),
     browser: ['TrigerBot', 'Chrome', '1.0.0'],
     syncFullHistory: false,
     markOnlineOnConnect: true,
@@ -47,9 +60,22 @@ async function startBot() {
 
   sock.ev.on('creds.update', saveCreds);
 
+  const processed = new Set();
+  const CLEANUP_MS = 1000 * 60 * 10;
+  setInterval(() => {
+    const now = Date.now();
+    for (const id of processed) {
+      processed.delete(id);
+    }
+  }, CLEANUP_MS);
+
   sock.ev.on('messages.upsert', async ({ messages }) => {
-    const msg = messages[0];
-    if (!msg.message) return;
+    const msg = messages?.[0];
+    if (!msg || !msg.message) return;
+
+    const msgId = msg.key?.id || msg.key?.participant || JSON.stringify(msg.key || {});
+    if (processed.has(msgId)) return;
+    processed.add(msgId);
 
     const config = getConfig();
     const text =
@@ -59,22 +85,43 @@ async function startBot() {
       msg.message.videoMessage?.caption ||
       '';
 
-    const prefixes = config.PREFIX?.split(',').map(p => p.trim()) || ['.'];
+    if (!text || typeof text !== 'string') return;
+
+    const prefixes = (config.PREFIX || '.').split(',').map(p => p.trim()).filter(Boolean);
     const usedPrefix = prefixes.find(p => text.toLowerCase().startsWith(p.toLowerCase()));
     if (!usedPrefix) return;
 
     const rawBody = text.trim().slice(usedPrefix.length).trim();
-    const isGroup = msg.key.remoteJid.endsWith('@g.us');
+    if (!rawBody) return;
 
-    let effectiveSender = isGroup
-      ? msg.key.participant || sock.user.id
-      : msg.key.fromMe
-        ? sock.user.id
-        : msg.key.remoteJidAlt || msg.key.remoteJid;
+    const chatJid = msg.key.remoteJid;
+    const isGroup = !!chatJid && chatJid.endsWith('@g.us');
 
-    let sender = await jidNormalizedUser(effectiveSender);
+    let effectiveSenderRef;
+    if (isGroup) {
+      effectiveSenderRef = msg.key.participant || resolveSenderFromMsg(msg, sock) || sock.user.id;
+    } else {
+      if (msg.key.fromMe) {
+        effectiveSenderRef = resolveSenderFromMsg(msg, sock) || sock.user.id;
+      } else {
+        effectiveSenderRef = msg.key.remoteJidAlt || msg.key.remoteJid || resolveSenderFromMsg(msg, sock) || sock.user.id;
+      }
+    }
 
-    if (sender.includes('@lid')) {
+    let sender = await jidNormalizedUser(effectiveSenderRef);
+
+    const botJid = await jidNormalizedUser(sock.user?.id);
+
+    if (chatJid === botJid) {
+      const selfActor = msg.key.participant || msg.participant || msg.message?.extendedTextMessage?.contextInfo?.participant || botJid;
+      sender = await jidNormalizedUser(selfActor);
+      if (!sender || sender === botJid) {
+        const ownerNum = (config.OWNER || '').trim();
+        if (ownerNum) sender = `${ownerNum}@s.whatsapp.net`;
+      }
+    }
+
+    if (sender?.includes('@lid')) {
       const lidMap = sock.signalRepository?.lidMapping;
       const lidUser = sender.split('@')[0];
       const mapped = lidMap?.getPNForLID(lidUser);
@@ -83,11 +130,11 @@ async function startBot() {
       }
     }
 
-    const senderNum = sender.split('@')[0];
+    const senderNum = (sender || '').split('@')[0];
     const isOwner = senderNum === (config.OWNER || '').trim();
-    const sudoNums = (config.SUDO || '').split(',').map(n => n.trim());
+    const sudoNums = (config.SUDO || '').split(',').map(n => n.trim()).filter(Boolean);
     const isSudo = sudoNums.includes(senderNum);
-    const isFromBot = msg.key.fromMe;
+    const isFromBot = !!msg.key.fromMe;
 
     const message = {
       sock,
@@ -101,21 +148,26 @@ async function startBot() {
 
     for (const plugin of getPlugins()) {
       const match = plugin.regex.exec(rawBody);
-      if (match) {
-        const allow = plugin.fromMe ? (isFromBot || isOwner) : (isOwner || isSudo || isFromBot);
-        if (!allow) {
-          console.log(chalk.gray(`⛔ Skipped plugin: ${plugin.pattern} (not allowed)`));
-          return;
-        }
+      if (!match) continue;
 
-        console.log(chalk.blue(`🔍 Matched plugin: ${plugin.pattern}`));
-        try {
-          await plugin.handler(message, match[1], match[2], rawBody);
-        } catch (err) {
-          console.log(chalk.red(`⚠️ Error in plugin ${plugin.pattern}: ${err.message}`));
-        }
-        break;
+      const allow = (() => {
+        if (chatJid === botJid && isOwner) return true;
+        if (plugin.fromMe) return (isFromBot || isOwner);
+        return (isOwner || isSudo || isFromBot);
+      })();
+
+      if (!allow) {
+        console.log(chalk.gray(`⛔ Skipped plugin: ${plugin.pattern} (not allowed)`));
+        return;
       }
+
+      console.log(chalk.blue(`🔍 Matched plugin: ${plugin.pattern}`));
+      try {
+        await plugin.handler(message, match[1], match[2], rawBody);
+      } catch (err) {
+        console.log(chalk.red(`⚠️ Error in plugin ${plugin.pattern}: ${err?.message || err}`));
+      }
+      break;
     }
   });
 
