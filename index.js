@@ -5,7 +5,7 @@ const {
   fetchLatestBaileysVersion,
   jidNormalizedUser,
   makeCacheableSignalKeyStore
-} = require('@whiskeysockets/baileys');
+} = require('baileys');
 const { Boom } = require('@hapi/boom');
 const fs = require('fs');
 const path = require('path');

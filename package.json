@@ -18,7 +18,7 @@
   },
   "homepage": "https://github.com/dark-lover-opz/triger#readme",
   "dependencies": {
-    "@whiskeysockets/baileys": "^7.0.0-rc.3",
+    "baileys": "git+https://dark-lover-opz@bitbucket.org/dark-lover-opz/baileys.git",
     "axios": "^1.12.2",
     "chalk": "^4.1.2",
     "dotenv": "^17.2.2",
