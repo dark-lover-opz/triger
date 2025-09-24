@@ -28,7 +28,7 @@ ehthumbs.db
 Desktop.ini
 Icon?
 
-# Logs and temp
+# Logs and temp files
 logs/
 *.log
 *.out

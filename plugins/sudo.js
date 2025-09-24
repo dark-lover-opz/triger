@@ -23,8 +23,8 @@ function updateSudoList(list) {
   loadConfig();
 }
 
-function extractNumber(message, match1, match2) {
-  let number = match1 || match2;
+function extractNumber(message, match) {
+  let number = match[1] || match[2];
   const context = message.msg?.extendedTextMessage?.contextInfo;
 
   if (!number && context?.participant) {
@@ -55,15 +55,18 @@ bot(
     type: 'admin',
     fromMe: false
   },
-  async (message, match1, match2, body) => {
+  async (message, match) => {
+    const body = message.body.toLowerCase();
     const command = body.startsWith('addsudo') ? 'add' :
                     body.startsWith('delsudo') ? 'remove' : 'list';
 
-    const number = extractNumber(message, match1, match2);
+    const number = extractNumber(message, match);
     const sudoList = getSudoList();
 
     if (command === 'list') {
-      return await message.send(sudoList.length ? `👑 SUDO list:\n${sudoList.join('\n')}` : 'No sudo users found.');
+      return await message.send(
+        sudoList.length ? `👑 SUDO list:\n${sudoList.join('\n')}` : 'No sudo users found.'
+      );
     }
 
     if (!number || !/^\d{10,}$/.test(number)) {
@@ -71,14 +74,18 @@ bot(
     }
 
     if (command === 'add') {
-      if (sudoList.includes(number)) return await message.send('✅ Already in sudo list.');
+      if (sudoList.includes(number)) {
+        return await message.send('✅ Already in sudo list.');
+      }
       sudoList.push(number);
       updateSudoList(sudoList);
       return await message.send(`✅ Added to sudo:\n${sudoList.join('\n')}`);
     }
 
     if (command === 'remove') {
-      if (!sudoList.includes(number)) return await message.send('❌ Not found in sudo list.');
+      if (!sudoList.includes(number)) {
+        return await message.send('❌ Not found in sudo list.');
+      }
       const updated = sudoList.filter(n => n !== number);
       updateSudoList(updated);
       return await message.send(`✅ Removed from sudo:\n${updated.join('\n')}`);

@@ -8,7 +8,8 @@ bot(
     type: 'admin',
     fromMe: false
   },
-  async (message, key, value) => {
+  async (message, match) => {
+    const [key, value] = match.slice(1);
     setConfig(key, value);
     await message.send(`✅ Updated ${key}=${value}`);
   }
@@ -21,7 +22,8 @@ bot(
     type: 'admin',
     fromMe: false
   },
-  async (message, key) => {
+  async (message, match) => {
+    const key = match[1];
     const value = getConfig()[key];
     if (value === undefined) {
       return await message.send(`❌ ${key} not found`);

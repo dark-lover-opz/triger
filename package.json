@@ -1,17 +1,18 @@
 {
   "name": "triger",
   "version": "1.0.0",
-  "description": "",
+  "description": "Modular WhatsApp bot built with Baileys v6.7.9",
   "main": "index.js",
   "scripts": {
+    "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/dark-lover-opz/triger.git"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["whatsapp", "bot", "baileys", "triger", "automation"],
+  "author": "dark-lover-opz",
   "license": "ISC",
   "bugs": {
     "url": "https://github.com/dark-lover-opz/triger/issues"

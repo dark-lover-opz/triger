@@ -8,9 +8,9 @@ bot(
     fromMe: false // ✅ Allow OWNER and SUDO to use
   },
   async (message, match) => {
-    const start = new Date().getTime();
+    const start = Date.now();
     await message.send(lang.plugins.ping.ping_sent);
-    const end = new Date().getTime();
-    return await message.send(lang.plugins.ping.pong.format(end - start));
+    const end = Date.now();
+    await message.send(lang.plugins.ping.pong.format(end - start));
   }
 );

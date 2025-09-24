@@ -5,8 +5,9 @@ bot(
     pattern: 'hello',
     desc: lang.plugins.hello.desc,
     type: 'fun',
+    fromMe: false
   },
-  async (message) => {
-    return await message.send(lang.plugins.hello.reply);
+  async (message, match) => {
+    await message.send(lang.plugins.hello.reply);
   }
 );

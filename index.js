@@ -14,6 +14,7 @@ const pino = require('pino');
 const { getConfig, setConfig } = require('./configCache');
 const { getPlugins } = require('./lib');
 
+// Load all plugins
 fs.readdirSync('./plugins').forEach(file => {
   if (file.endsWith('.js')) require(`./plugins/${file}`);
 });
@@ -24,19 +25,6 @@ function ensureOwner(botJid) {
     setConfig('OWNER', num);
     console.log(chalk.green(`✅ Bot number set as OWNER: ${num}`));
   }
-}
-
-function resolveSenderFromMsg(msg, sock) {
-  const possible =
-    msg.key?.participant ||
-    msg.participant ||
-    msg.message?.extendedTextMessage?.contextInfo?.participant ||
-    msg.message?.extendedTextMessage?.contextInfo?.remoteJid ||
-    msg.message?.viewOnceMessage?.message?.contextInfo?.participant ||
-    msg.message?.viewOnceMessage?.message?.contextInfo?.remoteJid ||
-    msg.key?.remoteJid ||
-    sock.user?.id;
-  return possible;
 }
 
 async function startBot() {
@@ -61,79 +49,57 @@ async function startBot() {
   sock.ev.on('creds.update', saveCreds);
 
   const processed = new Set();
-  const CLEANUP_MS = 1000 * 60 * 10;
-  setInterval(() => {
-    const now = Date.now();
-    for (const id of processed) {
-      processed.delete(id);
-    }
-  }, CLEANUP_MS);
+  setInterval(() => processed.clear(), 10 * 60 * 1000); // Cleanup every 10 minutes
 
   sock.ev.on('messages.upsert', async ({ messages }) => {
-    const msg = messages?.[0];
-    if (!msg || !msg.message) return;
+    if (!messages || messages.length === 0) return;
+    const msg = messages[0];
+    if (!msg.message) return;
 
-    const msgId = msg.key?.id || msg.key?.participant || JSON.stringify(msg.key || {});
-    if (processed.has(msgId)) return;
-    processed.add(msgId);
-
-    const config = getConfig();
     const text =
-      msg.message.conversation ||
-      msg.message.extendedTextMessage?.text ||
-      msg.message.imageMessage?.caption ||
-      msg.message.videoMessage?.caption ||
-      '';
+      msg.message?.conversation ||
+      msg.message?.extendedTextMessage?.text ||
+      msg.message?.imageMessage?.caption ||
+      msg.message?.videoMessage?.caption || '';
 
-    if (!text || typeof text !== 'string') return;
-
-    const prefixes = (config.PREFIX || '.').split(',').map(p => p.trim()).filter(Boolean);
-    const usedPrefix = prefixes.find(p => text.toLowerCase().startsWith(p.toLowerCase()));
-    if (!usedPrefix) return;
-
-    const rawBody = text.trim().slice(usedPrefix.length).trim();
+    const usedPrefix = '!';
+    const rawBody = text.trim().startsWith(usedPrefix)
+      ? text.trim().slice(usedPrefix.length).trim()
+      : null;
     if (!rawBody) return;
 
-    const chatJid = msg.key.remoteJid;
+    let chatJid = msg.key.remoteJid;
     const isGroup = !!chatJid && chatJid.endsWith('@g.us');
-
-    let effectiveSenderRef;
-    if (isGroup) {
-      effectiveSenderRef = msg.key.participant || resolveSenderFromMsg(msg, sock) || sock.user.id;
-    } else {
-      if (msg.key.fromMe) {
-        effectiveSenderRef = resolveSenderFromMsg(msg, sock) || sock.user.id;
-      } else {
-        effectiveSenderRef = msg.key.remoteJidAlt || msg.key.remoteJid || resolveSenderFromMsg(msg, sock) || sock.user.id;
-      }
-    }
-
+    let effectiveSenderRef = isGroup ? msg.key.participant || msg.participant : chatJid;
     let sender = await jidNormalizedUser(effectiveSenderRef);
-
+    let originalSenderNum = (sender || '').split('@')[0];
     const botJid = await jidNormalizedUser(sock.user?.id);
 
-    if (chatJid === botJid) {
-      const selfActor = msg.key.participant || msg.participant || msg.message?.extendedTextMessage?.contextInfo?.participant || botJid;
-      sender = await jidNormalizedUser(selfActor);
-      if (!sender || sender === botJid) {
-        const ownerNum = (config.OWNER || '').trim();
-        if (ownerNum) sender = `${ownerNum}@s.whatsapp.net`;
-      }
-    }
-
+    // LID Mapping
     if (sender?.includes('@lid')) {
+      console.log(`Attempting LID mapping for ${sender}`);
       const lidMap = sock.signalRepository?.lidMapping;
       const lidUser = sender.split('@')[0];
-      const mapped = lidMap?.getPNForLID(lidUser);
-      if (mapped) {
-        sender = await jidNormalizedUser(`${mapped}@s.whatsapp.net`);
+      if (lidMap?.getPNForLID) {
+        const mapped = lidMap.getPNForLID(lidUser);
+        if (mapped) {
+          originalSenderNum = mapped;
+          sender = await jidNormalizedUser(`${mapped}@s.whatsapp.net`);
+          chatJid = sender;
+          console.log(`✅ Mapped LID ${lidUser} to ${mapped}@s.whatsapp.net`);
+        } else {
+          console.log(`❌ No mapping found for LID ${lidUser}`);
+        }
+      } else {
+        console.log(`⚠️ lidMap or getPNForLID missing`);
       }
     }
 
-    const senderNum = (sender || '').split('@')[0];
-    const isOwner = senderNum === (config.OWNER || '').trim();
+    const normalizedChatJid = await jidNormalizedUser(chatJid);
+    const config = getConfig();
+    const isOwner = originalSenderNum === (config.OWNER || '').trim();
     const sudoNums = (config.SUDO || '').split(',').map(n => n.trim()).filter(Boolean);
-    const isSudo = sudoNums.includes(senderNum);
+    const isSudo = sudoNums.includes(originalSenderNum);
     const isFromBot = !!msg.key.fromMe;
 
     const message = {
@@ -143,31 +109,29 @@ async function startBot() {
       body: rawBody,
       send: async (text) => {
         await sock.sendMessage(msg.key.remoteJid, { text }, { quoted: msg });
-      }
+      },
     };
 
     for (const plugin of getPlugins()) {
       const match = plugin.regex.exec(rawBody);
       if (!match) continue;
 
-      const allow = (() => {
-        if (chatJid === botJid && isOwner) return true;
-        if (plugin.fromMe) return (isFromBot || isOwner);
-        return (isOwner || isSudo || isFromBot);
-      })();
+      const allow = () => {
+        if (normalizedChatJid === botJid && (isOwner || isSudo)) return true;
+        if (plugin.fromMe) return isFromBot || isOwner;
+        return isOwner || isSudo || isFromBot;
+      };
 
-      if (!allow) {
-        console.log(chalk.gray(`⛔ Skipped plugin: ${plugin.pattern} (not allowed)`));
-        return;
+      if (!allow()) {
+        console.warn(`⛔ Skipped plugin: ${plugin.regex} (not allowed)`);
+        continue;
       }
 
-      console.log(chalk.blue(`🔍 Matched plugin: ${plugin.pattern}`));
       try {
-        await plugin.handler(message, match[1], match[2], rawBody);
+        await plugin.handler(message, match);
       } catch (err) {
-        console.log(chalk.red(`⚠️ Error in plugin ${plugin.pattern}: ${err?.message || err}`));
+        console.error(`❌ Plugin ${plugin.name} failed: ${err}`);
       }
-      break;
     }
   });
 
