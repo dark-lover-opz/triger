@@ -1,11 +1,15 @@
-module.exports = {
-  name: 'ping',
-  regex: /^ping$/i,
-  fromMe: false,
-  handler: async (message) => {
-    const start = Date.now();
-    await message.send('Pinging...');
-    const end = Date.now();
-    await message.send(`Pong! ${end - start}ms`);
+const { bot, lang } = require('../lib/')
+
+bot(
+  {
+    pattern: 'ping ?(.*)',
+    desc: lang.plugins.ping.desc,
+    type: 'misc'
+  },
+  async (message) => {
+    const start = Date.now()
+    await message.send(lang.plugins.ping.ping_sent)
+    const end = Date.now()
+    await message.send(lang.plugins.ping.pong.format(end - start))
   }
-};
+)
