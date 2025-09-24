@@ -4,22 +4,18 @@ const dotenv = require('dotenv');
 
 const ENV_PATH = path.join(__dirname, '.env');
 
-// Load .env on startup
 if (fs.existsSync(ENV_PATH)) {
   dotenv.config({ path: ENV_PATH });
 }
 
-// Utility to convert string to boolean
 const toBool = (x) => x === 'true';
 
-// Reload .env dynamically (used by sudo/env plugins)
 function reloadEnv() {
   if (fs.existsSync(ENV_PATH)) {
     dotenv.config({ path: ENV_PATH, override: true });
   }
 }
 
-// Return current config snapshot
 function getConfig() {
   reloadEnv();
   return {

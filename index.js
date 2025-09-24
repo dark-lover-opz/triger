@@ -14,7 +14,6 @@ const pino = require('pino');
 const { getConfig, setConfig } = require('./configCache');
 const { getPlugins } = require('./lib');
 
-// Load all plugins
 fs.readdirSync('./plugins').forEach(file => {
   if (file.endsWith('.js')) require(`./plugins/${file}`);
 });
@@ -25,6 +24,20 @@ function ensureOwner(botJid) {
     setConfig('OWNER', num);
     console.log(chalk.green(`✅ Bot number set as OWNER: ${num}`));
   }
+}
+
+function normalizeJid(jid = '') {
+  return jid.replace(/[^0-9]/g, '');
+}
+
+// 🔧 Fix helper: normalize @lid JIDs into @s.whatsapp.net
+async function fixSenderJid(sock, jid) {
+  if (!jid) return jid;
+  if (jid.endsWith('@lid')) {
+    const num = jid.split('@')[0];
+    return `${num}@s.whatsapp.net`;
+  }
+  return await jidNormalizedUser(jid);
 }
 
 async function startBot() {
@@ -49,8 +62,9 @@ async function startBot() {
   sock.ev.on('creds.update', saveCreds);
 
   const processed = new Set();
-  setInterval(() => processed.clear(), 10 * 60 * 1000); // Cleanup every 10 minutes
+  setInterval(() => processed.clear(), 10 * 60 * 1000);
 
+  // 🔥 MAIN HANDLER
   sock.ev.on('messages.upsert', async ({ messages }) => {
     if (!messages || messages.length === 0) return;
     const msg = messages[0];
@@ -62,45 +76,39 @@ async function startBot() {
       msg.message?.imageMessage?.caption ||
       msg.message?.videoMessage?.caption || '';
 
-    const usedPrefix = '!';
+    const usedPrefix = getConfig().PREFIX || '!';
     const rawBody = text.trim().startsWith(usedPrefix)
       ? text.trim().slice(usedPrefix.length).trim()
       : null;
-    if (!rawBody) return;
+
+    if (!rawBody) {
+      console.log('⛔ Message does not match prefix or is empty:', text);
+      return;
+    }
 
     let chatJid = msg.key.remoteJid;
     const isGroup = !!chatJid && chatJid.endsWith('@g.us');
-    let effectiveSenderRef = isGroup ? msg.key.participant || msg.participant : chatJid;
-    let sender = await jidNormalizedUser(effectiveSenderRef);
-    let originalSenderNum = (sender || '').split('@')[0];
+
+    // detect sender properly
+    let effectiveSenderRef = isGroup
+      ? msg.key.participant || msg.participant
+      : msg.key.fromMe
+        ? sock.user.id
+        : chatJid;
+
+    // ✅ Fix: normalize sender/chat (force @lid → @s.whatsapp.net)
+    let sender = await fixSenderJid(sock, effectiveSenderRef);
+    let chatIdFixed = await fixSenderJid(sock, chatJid);
+
+    let originalSenderNum = normalizeJid(sender);
     const botJid = await jidNormalizedUser(sock.user?.id);
 
-    // LID Mapping
-    if (sender?.includes('@lid')) {
-      console.log(`Attempting LID mapping for ${sender}`);
-      const lidMap = sock.signalRepository?.lidMapping;
-      const lidUser = sender.split('@')[0];
-      if (lidMap?.getPNForLID) {
-        const mapped = lidMap.getPNForLID(lidUser);
-        if (mapped) {
-          originalSenderNum = mapped;
-          sender = await jidNormalizedUser(`${mapped}@s.whatsapp.net`);
-          chatJid = sender;
-          console.log(`✅ Mapped LID ${lidUser} to ${mapped}@s.whatsapp.net`);
-        } else {
-          console.log(`❌ No mapping found for LID ${lidUser}`);
-        }
-      } else {
-        console.log(`⚠️ lidMap or getPNForLID missing`);
-      }
-    }
-
-    const normalizedChatJid = await jidNormalizedUser(chatJid);
+    const normalizedChatJid = await jidNormalizedUser(chatIdFixed);
     const config = getConfig();
-    const isOwner = originalSenderNum === (config.OWNER || '').trim();
-    const sudoNums = (config.SUDO || '').split(',').map(n => n.trim()).filter(Boolean);
+    const isOwner = originalSenderNum === normalizeJid(config.OWNER || '');
+    const sudoNums = (config.SUDO || '').split(',').map(n => normalizeJid(n)).filter(Boolean);
     const isSudo = sudoNums.includes(originalSenderNum);
-    const isFromBot = !!msg.key.fromMe;
+    const isFromBot = normalizeJid(sender) === normalizeJid(sock.user?.id);
 
     const message = {
       sock,
@@ -112,18 +120,44 @@ async function startBot() {
       },
     };
 
-    for (const plugin of getPlugins()) {
+    // Debug log
+    console.log({
+      botJid,
+      sender,
+      originalSenderNum,
+      isOwner,
+      isSudo,
+      isFromBot,
+      normalizedChatJid,
+      chatJid: chatIdFixed,
+      rawBody
+    });
+
+    const plugins = await getPlugins();
+    for (const plugin of plugins) {
+      if (!plugin.regex || typeof plugin.handler !== 'function') {
+        console.warn(`⚠ Skipped plugin ${plugin.name || 'unknown'}: missing regex or handler`);
+        continue;
+      }
+
       const match = plugin.regex.exec(rawBody);
       if (!match) continue;
 
+      // private bot mode: only owner/sudo
       const allow = () => {
-        if (normalizedChatJid === botJid && (isOwner || isSudo)) return true;
-        if (plugin.fromMe) return isFromBot || isOwner;
-        return isOwner || isSudo || isFromBot;
+        return isOwner || isSudo;
       };
 
       if (!allow()) {
-        console.warn(`⛔ Skipped plugin: ${plugin.regex} (not allowed)`);
+        console.warn(`⛔ Skipped plugin: ${plugin.regex} (sender not allowed)`);
+        console.log({
+          sender,
+          originalSenderNum,
+          isOwner,
+          isSudo,
+          chatJid: chatIdFixed,
+          rawBody
+        });
         continue;
       }
 

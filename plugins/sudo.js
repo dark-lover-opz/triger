@@ -1,6 +1,6 @@
+const { bot } = require('../lib/bot'); // ✅ Correct import
 const fs = require('fs');
 const path = require('path');
-const { bot } = require('../lib');
 const { loadConfig } = require('../configCache');
 const ENV_PATH = path.join(__dirname, '../.env');
 

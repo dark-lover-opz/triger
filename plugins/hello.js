@@ -1,13 +1,13 @@
-const { bot, lang } = require('../lib');
+const { bot } = require('../lib/bot');
 
 bot(
   {
     pattern: 'hello',
-    desc: lang.plugins.hello.desc,
-    type: 'fun',
+    desc: 'Responds with a greeting',
+    type: 'misc',
     fromMe: false
   },
-  async (message, match) => {
-    await message.send(lang.plugins.hello.reply);
+  async (message) => {
+    await message.send('👋 Hello! Triger is online and ready.');
   }
 );

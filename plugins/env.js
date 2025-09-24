@@ -1,4 +1,4 @@
-const { bot } = require('../lib');
+const { bot } = require('../lib/bot'); // ✅ Correct import
 const { getConfig, setConfig } = require('../configCache');
 
 bot(
