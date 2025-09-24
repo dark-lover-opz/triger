@@ -19,6 +19,7 @@ const { reloadEnv } = require('./config')
 // ✅ Bot framework
 const { loadPlugins, handleMessage } = require('./lib')
 const { fixJid } = require('./lib/utils')
+const { attachRetryHandler } = require('./lib/functions')
 
 // 🔥 Autoload plugins
 loadPlugins()
@@ -55,8 +56,15 @@ async function startBot() {
     markOnlineOnConnect: true,
     emitOwnEvents: true,
     generateHighQualityLinkPreview: true,
-    getMessage: async () => undefined
+
+    // ✅ fallback getMessage so retries don’t fail instantly
+    getMessage: async (key) => {
+      return { conversation: "Baileys fallback message" }
+    }
   })
+
+  // ✅ attach retry handler
+  attachRetryHandler(sock)
 
   sock.ev.on('creds.update', saveCreds)
 
@@ -107,7 +115,7 @@ async function startBot() {
     }
   })
 
-  // ✅ Auto-fix sendMessage
+  // ✅ Auto-fix sendMessage JIDs
   const originalSend = sock.sendMessage.bind(sock)
   sock.sendMessage = async (jid, content, options) => {
     const fixed = await fixJid(jid)
