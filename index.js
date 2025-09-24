@@ -12,24 +12,24 @@ const path = require('path')
 const chalk = require('chalk')
 const pino = require('pino')
 
-// ✅ Correct config import
+// ✅ Config import
 const getConfig = require('./config')
 const { reloadEnv } = require('./config')
 
-// ✅ Import bot framework
+// ✅ Bot framework
 const { loadPlugins, handleMessage } = require('./lib')
+const { fixJid } = require('./lib/utils')
 
-// 🔥 Autoload all plugins from plugins/
+// 🔥 Autoload plugins
 loadPlugins()
 
 // =======================
-// Ensure OWNER is set
+// Ensure OWNER
 // =======================
 function ensureOwner(botJid) {
   const num = botJid.split('@')[0]
   const config = getConfig()
   if (!config.OWNER || config.OWNER !== num) {
-    // direct update (simple)
     fs.appendFileSync(path.join(__dirname, '.env'), `\nOWNER=${num}`)
     reloadEnv()
     console.log(chalk.green(`✅ Bot number set as OWNER: ${num}`))
@@ -37,23 +37,7 @@ function ensureOwner(botJid) {
 }
 
 // =======================
-// JID Normalizer
-// =======================
-function normalizeJid(jid = '') {
-  return jid.replace(/[^0-9]/g, '')
-}
-
-async function fixSenderJid(sock, jid) {
-  if (!jid) return jid
-  if (jid.endsWith('@lid')) {
-    const num = jid.split('@')[0]
-    return `${num}@s.whatsapp.net`
-  }
-  return await jidNormalizedUser(jid)
-}
-
-// =======================
-// Start the bot
+// Start Bot
 // =======================
 async function startBot() {
   const { version } = await fetchLatestBaileysVersion()
@@ -76,13 +60,17 @@ async function startBot() {
 
   sock.ev.on('creds.update', saveCreds)
 
-  // 🔥 MAIN HANDLER
+  // 🔥 Handle messages
   sock.ev.on('messages.upsert', async ({ messages }) => {
     if (!messages || messages.length === 0) return
-    const msg = messages[0]
+    let msg = messages[0]
     if (!msg.message) return
 
-    // Pass into universal handler
+    // Normalize JIDs
+    msg.key.remoteJid = await fixJid(msg.key.remoteJid)
+    if (msg.key.participant) msg.key.participant = await fixJid(msg.key.participant)
+    if (msg.key.senderPn) msg.key.senderPn = await fixJid(msg.key.senderPn)
+
     try {
       await handleMessage(msg, sock)
     } catch (err) {
@@ -97,7 +85,7 @@ async function startBot() {
     }
 
     if (connection === 'open') {
-      const botJid = await jidNormalizedUser(sock.user?.id)
+      const botJid = await fixJid(sock.user?.id)
       if (botJid) {
         ensureOwner(botJid)
         console.log(chalk.blue(`🤖 Triger is online as ${botJid}`))
@@ -118,6 +106,13 @@ async function startBot() {
       }
     }
   })
+
+  // ✅ Auto-fix sendMessage
+  const originalSend = sock.sendMessage.bind(sock)
+  sock.sendMessage = async (jid, content, options) => {
+    const fixed = await fixJid(jid)
+    return originalSend(fixed, content, options)
+  }
 }
 
 startBot()
