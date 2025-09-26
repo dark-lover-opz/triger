@@ -19,7 +19,7 @@
   },
   "homepage": "https://github.com/dark-lover-opz/triger#readme",
   "dependencies": {
-    "baileys": "git+https://dark-lover-opz@bitbucket.org/dark-lover-opz/baileys.git",
+    "baileys": "git+https://lyfe00011-admin@bitbucket.org/lyfe00011/baileys.git",
     "axios": "^1.12.2",
     "chalk": "^4.1.2",
     "dotenv": "^17.2.2",
