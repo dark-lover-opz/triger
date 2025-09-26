@@ -20,8 +20,12 @@ const { loadPlugins, handleMessage } = require('./lib')
 const { fixJid } = require('./lib/utils')
 const { attachRetryHandler } = require('./lib/functions')
 
+// 🔥 Autoload plugins
 loadPlugins()
 
+// =======================
+// Ensure OWNER
+// =======================
 function ensureOwner(botJid) {
   const num = botJid.split('@')[0]
   const config = getConfig()
@@ -32,6 +36,9 @@ function ensureOwner(botJid) {
   }
 }
 
+// =======================
+// Start Bot
+// =======================
 async function startBot() {
   const { version } = await fetchLatestBaileysVersion()
 
@@ -62,19 +69,23 @@ async function startBot() {
     emitOwnEvents: true,
     generateHighQualityLinkPreview: true,
 
+    // ✅ fallback getMessage so retries don’t fail instantly
     getMessage: async (key) => {
       return { conversation: "Baileys fallback message" }
     }
   })
 
+  // ✅ attach retry handler
   attachRetryHandler(sock)
   sock.ev.on('creds.update', saveCreds)
 
+  // 🔥 Handle messages
   sock.ev.on('messages.upsert', async ({ messages }) => {
     if (!messages || messages.length === 0) return
     let msg = messages[0]
     if (!msg.message) return
 
+    // Normalize JIDs
     msg.key.remoteJid = await fixJid(msg.key.remoteJid)
     if (msg.key.participant) msg.key.participant = await fixJid(msg.key.participant)
     if (msg.key.senderPn) msg.key.senderPn = await fixJid(msg.key.senderPn)
@@ -98,6 +109,8 @@ async function startBot() {
         ensureOwner(botJid)
         console.log(chalk.blue(`🤖 Triger is online as ${botJid}`))
         console.log(chalk.green('✅ Connection established.'))
+      } else {
+        console.log(chalk.red('❌ Failed to detect bot number'))
       }
     }
 
@@ -113,6 +126,7 @@ async function startBot() {
     }
   })
 
+  // ✅ Auto-fix sendMessage JIDs
   const originalSend = sock.sendMessage.bind(sock)
   sock.sendMessage = async (jid, content, options) => {
     const fixed = await fixJid(jid)
