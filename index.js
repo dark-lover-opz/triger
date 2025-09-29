@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const chalk = require('chalk');
 const pino = require('pino');
+const axios = require('axios');
 require('dotenv').config();
 
 const getConfig = require('./config');
@@ -36,6 +37,20 @@ function ensureOwner(botJid) {
 }
 
 // =======================
+// Load session from Pastebin
+// =======================
+async function loadSessionFromPastebin(sessionId) {
+  const url = `https://paste.c-net.org/${sessionId}`;
+  try {
+    const response = await axios.get(url);
+    return response.data;
+  } catch (err) {
+    console.error('❌ Failed to fetch session from Pastebin:', err.message);
+    return null;
+  }
+}
+
+// =======================
 // Start Bot
 // =======================
 async function startBot() {
@@ -43,12 +58,25 @@ async function startBot() {
 
   let state, saveCreds;
 
-  // ✅ Accept SESSION_ID from .env or launcher
-  if (process.env.SESSION_ID && process.env.SESSION_ID.trim().startsWith('{')) {
+  const sessionEnv = process.env.SESSION_ID?.trim();
+
+  if (sessionEnv && sessionEnv.startsWith('levanter_')) {
+    const pasteId = sessionEnv.replace('levanter_', '');
+    const sessionData = await loadSessionFromPastebin(pasteId);
+    if (!sessionData) {
+      console.log(chalk.red('❌ Invalid or expired session ID'));
+      process.exit(1);
+    }
+
     const authFile = path.join(__dirname, 'session.json');
-    fs.writeFileSync(authFile, process.env.SESSION_ID, 'utf8');
+    fs.writeFileSync(authFile, sessionData, 'utf8');
     ({ state, saveCreds } = useSingleFileAuthState(authFile));
-    console.log(chalk.green('✅ Using SESSION_ID from .env'));
+    console.log(chalk.green('✅ Loaded session from Pastebin'));
+  } else if (sessionEnv && sessionEnv.startsWith('{')) {
+    const authFile = path.join(__dirname, 'session.json');
+    fs.writeFileSync(authFile, sessionEnv, 'utf8');
+    ({ state, saveCreds } = useSingleFileAuthState(authFile));
+    console.log(chalk.green('✅ Using raw SESSION_ID from .env'));
   } else {
     ({ state, saveCreds } = await useMultiFileAuthState('./auth'));
     console.log(chalk.yellow('📂 Using multi-file auth (auth folder)'));
@@ -91,7 +119,7 @@ async function startBot() {
   });
 
   sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
-    if (qr && !process.env.SESSION_ID) {
+    if (qr && !sessionEnv) {
       console.log(chalk.yellow('📱 Scan this QR to connect:'));
       console.log(qr);
     }
