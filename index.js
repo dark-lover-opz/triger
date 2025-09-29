@@ -1,7 +1,7 @@
 const {
   default: makeWASocket,
-  useMultiFileAuthState,
   useSingleFileAuthState,
+  useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore
@@ -43,7 +43,8 @@ async function startBot() {
 
   let state, saveCreds;
 
-  if (process.env.SESSION_ID && process.env.SESSION_ID.trim() !== '') {
+  // ✅ Accept SESSION_ID from .env or launcher
+  if (process.env.SESSION_ID && process.env.SESSION_ID.trim().startsWith('{')) {
     const authFile = path.join(__dirname, 'session.json');
     fs.writeFileSync(authFile, process.env.SESSION_ID, 'utf8');
     ({ state, saveCreds } = useSingleFileAuthState(authFile));
