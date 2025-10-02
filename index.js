@@ -6,7 +6,7 @@ const {
   fetchLatestBaileysVersion,
   jidNormalizedUser,
   makeCacheableSignalKeyStore
-} = require('baileys')
+} = require('baileys') // Using your custom fork
 const { Boom } = require('@hapi/boom')
 const fs = require('fs')
 const path = require('path')
@@ -70,14 +70,20 @@ async function startBot() {
   attachRetryHandler(sock)
   sock.ev.on('creds.update', saveCreds)
 
+  const botJid = await fixJid(sock.user?.id) // Move botJid here for early access
+
   sock.ev.on('messages.upsert', async ({ messages }) => {
     if (!messages || messages.length === 0) return
     let msg = messages[0]
     if (!msg.message) return
 
     msg.key.remoteJid = await fixJid(msg.key.remoteJid)
-    if (msg.key.participant) msg.key.participant = await fixJid(msg.key.participant)
-    if (msg.key.senderPn) msg.key.senderPn = await fixJid(msg.key.senderPn)
+    if (msg.key.participant) msg.key.participant = await fixJid(msg.key.participant, msg.key.fromMe, botJid)
+    if (msg.key.senderPn) msg.key.senderPn = await fixJid(msg.key.senderPn, msg.key.fromMe, botJid)
+    // Fix LID for fromMe messages in groups
+    if (msg.key.fromMe && msg.key.participant && msg.key.participant.endsWith('@lid')) {
+      msg.key.participant = botJid
+    }
 
     try {
       await handleMessage(msg, sock)
@@ -93,7 +99,6 @@ async function startBot() {
     }
 
     if (connection === 'open') {
-      const botJid = await fixJid(sock.user?.id)
       if (botJid) {
         ensureOwner(botJid)
         console.log(chalk.blue(`🤖 Triger is online as ${botJid}`))
